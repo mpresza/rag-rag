@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { INITIAL_MARKET_ASSETS } from './data/mockMarketData';
-import { MarketAsset, PaperTradePosition, PaperTradeOrder } from './types/market';
+import { MarketAsset, PaperTradePosition, PaperTradeOrder, PriceAlert } from './types/market';
 import { Header } from './components/Header';
 import { TickerRibbon } from './components/TickerRibbon';
 import { MarketsOverview } from './components/MarketsOverview';
@@ -10,6 +10,7 @@ import { MarketScreener } from './components/MarketScreener';
 import { WatchlistAndPaperTrading } from './components/WatchlistAndPaperTrading';
 import { NewsAndCalendar } from './components/NewsAndCalendar';
 import { SymbolSearchModal } from './components/SymbolSearchModal';
+import { Bell, X } from 'lucide-react';
 
 const DEFAULT_WATCHLIST = ['NVDA', 'AAPL', 'BTCUSD', 'SPX', 'XAUUSD', 'ETHUSD'];
 const INITIAL_PAPER_CASH = 100000;
@@ -22,6 +23,36 @@ export default function App() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activeTimezone, setActiveTimezone] = useState<string>('EST');
   const [isDark, setIsDark] = useState<boolean>(true);
+  const [triggeredAlertMessage, setTriggeredAlertMessage] = useState<string | null>(null);
+
+  // Price Alerts state
+  const [alerts, setAlerts] = useState<PriceAlert[]>(() => {
+    try {
+      const saved = localStorage.getItem('tv_price_alerts');
+      return saved ? JSON.parse(saved) : [
+        {
+          id: 'alt-1',
+          symbol: 'NVDA',
+          targetPrice: 142.50,
+          condition: 'above',
+          note: 'Breakout above 142.50 resistance',
+          createdAt: '2026-11-12 08:30 EST',
+          triggered: false
+        },
+        {
+          id: 'alt-2',
+          symbol: 'BTCUSD',
+          targetPrice: 70000.00,
+          condition: 'above',
+          note: 'Psychological $70k milestone',
+          createdAt: '2026-11-12 09:00 EST',
+          triggered: false
+        }
+      ];
+    } catch {
+      return [];
+    }
+  });
 
   // Watchlist state with localStorage
   const [watchlist, setWatchlist] = useState<string[]>(() => {
@@ -123,8 +154,23 @@ export default function App() {
   }, [positions]);
 
   useEffect(() => {
-    localStorage.setItem('tv_paper_orders', JSON.stringify(orders));
-  }, [orders]);
+    localStorage.setItem('tv_price_alerts', JSON.stringify(alerts));
+  }, [alerts]);
+
+  // Alert management handlers
+  const handleAddAlert = useCallback((newAlertData: Omit<PriceAlert, 'id' | 'createdAt'>) => {
+    const alertItem: PriceAlert = {
+      ...newAlertData,
+      id: `alt-${Date.now()}`,
+      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      triggered: false
+    };
+    setAlerts(prev => [alertItem, ...prev]);
+  }, []);
+
+  const handleDeleteAlert = useCallback((id: string) => {
+    setAlerts(prev => prev.filter(a => a.id !== id));
+  }, []);
 
   // Handle Dark / Light Mode HTML class
   useEffect(() => {
@@ -187,6 +233,22 @@ export default function App() {
           changePercent: newChangePercent,
           sparklineData: updatedSparkline
         };
+
+        // Check if any price alert was triggered
+        setAlerts((prevAlerts) => {
+          return prevAlerts.map(alt => {
+            if (alt.symbol === target.symbol && !alt.triggered) {
+              const triggered = (alt.condition === 'above' && newPrice >= alt.targetPrice) ||
+                                (alt.condition === 'below' && newPrice <= alt.targetPrice);
+              if (triggered) {
+                setTriggeredAlertMessage(`PRICE ALERT: ${alt.symbol} reached $${newPrice} (${alt.note || alt.condition})`);
+                setTimeout(() => setTriggeredAlertMessage(null), 5000);
+                return { ...alt, triggered: true };
+              }
+            }
+            return alt;
+          });
+        });
 
         return newAssets;
       });
@@ -374,6 +436,22 @@ export default function App() {
         watchlistCount={watchlist.length}
       />
 
+      {/* Pro Alert Trigger Toast Banner */}
+      {triggeredAlertMessage && (
+        <div className="bg-amber-500 text-black px-4 py-2 text-xs font-bold font-mono flex items-center justify-between shadow-lg sticky top-12 z-50 animate-in slide-in-from-top duration-200">
+          <div className="flex items-center gap-2">
+            <Bell className="w-4 h-4 animate-bounce" />
+            <span>{triggeredAlertMessage}</span>
+          </div>
+          <button
+            onClick={() => setTriggeredAlertMessage(null)}
+            className="p-1 hover:bg-black/10 rounded transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* 2. Streaming Real-Time Marquee Ticker Tape */}
       <TickerRibbon
         assets={assets}
@@ -402,6 +480,9 @@ export default function App() {
             isWatchlisted={watchlist.includes(currentAsset.symbol)}
             onToggleWatchlist={handleToggleWatchlist}
             paperBalance={paperBalance}
+            alerts={alerts}
+            onAddAlert={handleAddAlert}
+            onDeleteAlert={handleDeleteAlert}
           />
         )}
 

@@ -44,10 +44,15 @@ export const Header: React.FC<HeaderProps> = ({
               <TrendingUp className="w-5 h-5 stroke-[2.5]" />
             </div>
             <div className="flex flex-col">
-              <span className="text-[17px] font-extrabold tracking-tight text-white whitespace-nowrap">
-                Trading<span className="text-[#2962ff]">View</span>
-              </span>
-              <span className="text-[10px] tracking-widest text-[#787b86] uppercase font-semibold">Markets</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[17px] font-extrabold tracking-tight text-white whitespace-nowrap">
+                  Trading<span className="text-[#2962ff]">View</span>
+                </span>
+                <span className="px-1.5 py-0.2 rounded text-[9px] font-black font-mono tracking-wider uppercase bg-[#2962ff] text-white">
+                  PRO+
+                </span>
+              </div>
+              <span className="text-[10px] tracking-widest text-[#787b86] uppercase font-semibold">Institutional Terminal</span>
             </div>
           </button>
         </div>

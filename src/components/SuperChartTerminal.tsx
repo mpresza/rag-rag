@@ -1,18 +1,22 @@
 import React, { useState, useMemo } from 'react';
-import { MarketAsset, OrderBook } from '../types/market';
+import { MarketAsset, OrderBook, PriceAlert, MultiChartLayout } from '../types/market';
 import { InteractiveChart } from './InteractiveChart';
+import { PriceAlertsModal } from './PriceAlertsModal';
 import { generateOrderBook } from '../data/mockMarketData';
-import { formatPrice, formatLargeNumber } from '../utils/technicalAnalysis';
+import { formatPrice } from '../utils/technicalAnalysis';
 import {
   ChevronRight,
-  ChevronLeft,
-  DollarSign,
   TrendingUp,
   TrendingDown,
   CheckCircle2,
-  ShieldAlert,
-  BarChart,
-  Star
+  Star,
+  LayoutGrid,
+  Columns,
+  Square,
+  Bell,
+  Target,
+  Shield,
+  Percent
 } from 'lucide-react';
 
 interface SuperChartTerminalProps {
@@ -29,6 +33,9 @@ interface SuperChartTerminalProps {
   isWatchlisted: boolean;
   onToggleWatchlist: (symbol: string) => void;
   paperBalance: number;
+  alerts: PriceAlert[];
+  onAddAlert: (alert: Omit<PriceAlert, 'id' | 'createdAt'>) => void;
+  onDeleteAlert: (id: string) => void;
 }
 
 export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
@@ -38,15 +45,28 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
   onExecuteTrade,
   isWatchlisted,
   onToggleWatchlist,
-  paperBalance
+  paperBalance,
+  alerts,
+  onAddAlert,
+  onDeleteAlert
 }) => {
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [orderType, setOrderType] = useState<'market' | 'limit'>('market');
   const [shares, setShares] = useState<number>(10);
   const [limitPrice, setLimitPrice] = useState<number>(asset.price);
   const [isPanelCollapsed, setIsPanelCollapsed] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'trade' | 'orderbook' | 'details'>('trade');
+  const [activeTab, setActiveTab] = useState<'trade' | 'dom' | 'details'>('trade');
   const [orderSuccessMsg, setOrderSuccessMsg] = useState<string | null>(null);
+
+  // Pro features: Multi-chart Layout & Secondary comparison asset
+  const [chartLayout, setChartLayout] = useState<MultiChartLayout>('1x1');
+  const [secondarySymbol, setSecondarySymbol] = useState<string>('SPX');
+  const [isAlertsModalOpen, setIsAlertsModalOpen] = useState(false);
+
+  // Pro Order Execution features: TP / SL inputs
+  const [enableTPSL, setEnableTPSL] = useState(false);
+  const [takeProfitPrice, setTakeProfitPrice] = useState<number>(Number((asset.price * 1.05).toFixed(2)));
+  const [stopLossPrice, setStopLossPrice] = useState<number>(Number((asset.price * 0.97).toFixed(2)));
 
   // Generate synthetic orderbook depth ladder for current price
   const orderBook: OrderBook = useMemo(() => {
@@ -55,6 +75,20 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
 
   const effectivePrice = orderType === 'market' ? asset.price : limitPrice;
   const orderTotal = effectivePrice * shares;
+
+  // Secondary asset for multi-chart layout
+  const secondaryAsset = useMemo(() => {
+    return assets.find(a => a.symbol === secondarySymbol) || assets[1] || asset;
+  }, [assets, secondarySymbol, asset]);
+
+  // Calculated Risk / Reward
+  const riskRewardRatio = useMemo(() => {
+    if (!enableTPSL) return null;
+    const potentialProfit = Math.abs(takeProfitPrice - effectivePrice);
+    const potentialRisk = Math.abs(effectivePrice - stopLossPrice);
+    if (potentialRisk <= 0) return 0;
+    return Number((potentialProfit / potentialRisk).toFixed(2));
+  }, [enableTPSL, takeProfitPrice, stopLossPrice, effectivePrice]);
 
   const handleOrderSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,10 +113,17 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
     setTimeout(() => setOrderSuccessMsg(null), 4000);
   };
 
+  const handleDOMClickPrice = (price: number) => {
+    setOrderType('limit');
+    setLimitPrice(price);
+    setActiveTab('trade');
+  };
+
   return (
-    <div className="w-full flex flex-col gap-4 max-w-[1720px] mx-auto">
-      {/* Top Asset Switcher Bar */}
-      <div className="flex items-center justify-between bg-[#1e222d] border border-[#2a2e39] rounded-lg p-3">
+    <div className="w-full flex flex-col gap-4 max-w-[1720px] mx-auto font-sans">
+      {/* Top Pro Asset Switcher & Multi-Chart Layout Bar */}
+      <div className="flex flex-wrap items-center justify-between bg-[#1e222d] border border-[#2a2e39] rounded-lg p-3 gap-3">
+        {/* Left: Star, Symbol, Name, Exchange */}
         <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
           <button
             onClick={() => onToggleWatchlist(asset.symbol)}
@@ -97,20 +138,20 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
           <div className="flex items-center gap-2">
             <span className="text-xl font-black text-white tracking-tight">{asset.symbol}</span>
             <span className="text-sm text-[#787b86] font-medium hidden sm:inline">{asset.name}</span>
-            <span className="text-xs bg-[#2a2e39] text-[#9db2ce] px-2 py-0.5 rounded font-mono">
+            <span className="text-xs bg-[#2a2e39] text-[#9db2ce] px-2 py-0.5 rounded font-mono font-medium">
               {asset.exchange} · {asset.category.toUpperCase()}
             </span>
           </div>
 
           {/* Quick symbol picker chips */}
-          <div className="hidden md:flex items-center gap-1.5 pl-4 border-l border-[#2a2e39]">
+          <div className="hidden md:flex items-center gap-1.5 pl-3 border-l border-[#2a2e39]">
             {['NVDA', 'AAPL', 'BTCUSD', 'ETHUSD', 'SPX', 'XAUUSD', 'EURUSD'].map((sym) => (
               <button
                 key={sym}
                 onClick={() => onSelectSymbol(sym)}
                 className={`px-2 py-1 text-xs font-mono font-semibold rounded transition-colors ${
                   asset.symbol === sym
-                    ? 'bg-[#2962ff] text-white'
+                    ? 'bg-[#2962ff] text-white shadow-xs'
                     : 'text-[#787b86] hover:text-white bg-[#131722]'
                 }`}
               >
@@ -120,8 +161,59 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-4 text-right">
-          <div>
+        {/* Center / Right: Multi-Chart Layout Switcher & Alert Bell */}
+        <div className="flex items-center gap-4">
+          {/* Multi-Chart Grid Switcher (1x1, 1x2 split) */}
+          <div className="hidden sm:flex items-center gap-1 bg-[#131722] p-1 rounded-md border border-[#2a2e39]">
+            <button
+              onClick={() => setChartLayout('1x1')}
+              className={`p-1.5 rounded text-xs transition-colors flex items-center gap-1 ${
+                chartLayout === '1x1' ? 'bg-[#2a2e39] text-white' : 'text-[#787b86] hover:text-white'
+              }`}
+              title="Single Chart View"
+            >
+              <Square className="w-3.5 h-3.5" />
+              <span className="text-[10px] font-mono font-bold">1x1</span>
+            </button>
+            <button
+              onClick={() => setChartLayout('1x2')}
+              className={`p-1.5 rounded text-xs transition-colors flex items-center gap-1 ${
+                chartLayout === '1x2' ? 'bg-[#2a2e39] text-white' : 'text-[#787b86] hover:text-white'
+              }`}
+              title="Dual Split Chart Comparison"
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span className="text-[10px] font-mono font-bold">Split</span>
+            </button>
+          </div>
+
+          {chartLayout === '1x2' && (
+            <div className="flex items-center gap-1.5 text-xs font-mono">
+              <span className="text-[#787b86]">Compare:</span>
+              <select
+                value={secondarySymbol}
+                onChange={(e) => setSecondarySymbol(e.target.value)}
+                className="bg-[#131722] border border-[#2a2e39] rounded px-2 py-1 text-white focus:outline-none"
+              >
+                {assets.filter(a => a.symbol !== asset.symbol).map(a => (
+                  <option key={a.symbol} value={a.symbol}>{a.symbol}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Price Alert Button */}
+          <button
+            onClick={() => setIsAlertsModalOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-amber-400 bg-amber-400/10 hover:bg-amber-400/20 border border-amber-400/30 rounded-md transition-colors"
+            title="Set Price Alert"
+          >
+            <Bell className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Alert ({alerts.filter(a => a.symbol === asset.symbol).length})</span>
+          </button>
+
+          {/* Current Price Readout */}
+          <div className="text-right">
             <div className="text-xl font-bold font-mono text-white tabular-nums">
               {formatPrice(asset.price, asset.currency === '%' ? '%' : '$')}
             </div>
@@ -137,21 +229,44 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
         </div>
       </div>
 
-      {/* Main Terminal Grid: Interactive Chart + Order/Depth Side Panel */}
+      {/* Main Terminal Viewport Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* Left Column: Full SuperChart */}
+        {/* Left Column: Interactive SuperChart or Dual Split */}
         <div className={`transition-all duration-200 ${isPanelCollapsed ? 'lg:col-span-12' : 'lg:col-span-8 xl:col-span-9'}`}>
-          <InteractiveChart
-            asset={asset}
-            onOpenTrade={(actionSide) => {
-              setSide(actionSide);
-              setIsPanelCollapsed(false);
-              setActiveTab('trade');
-            }}
-          />
+          {chartLayout === '1x1' ? (
+            <InteractiveChart
+              asset={asset}
+              onOpenTrade={(actionSide) => {
+                setSide(actionSide);
+                setIsPanelCollapsed(false);
+                setActiveTab('trade');
+              }}
+              onOpenAlerts={() => setIsAlertsModalOpen(true)}
+            />
+          ) : (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <InteractiveChart
+                asset={asset}
+                onOpenTrade={(actionSide) => {
+                  setSide(actionSide);
+                  setIsPanelCollapsed(false);
+                  setActiveTab('trade');
+                }}
+                onOpenAlerts={() => setIsAlertsModalOpen(true)}
+              />
+              <InteractiveChart
+                asset={secondaryAsset}
+                onOpenTrade={(actionSide) => {
+                  onSelectSymbol(secondaryAsset.symbol);
+                  setSide(actionSide);
+                }}
+                onOpenAlerts={() => setIsAlertsModalOpen(true)}
+              />
+            </div>
+          )}
 
-          {/* Asset Key Metrics Strip */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 mt-4">
+          {/* Key Metrics Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mt-4">
             <div className="bg-[#1e222d] border border-[#2a2e39] p-2.5 rounded-lg">
               <span className="text-[11px] text-[#787b86] block">24h High / Low</span>
               <span className="text-xs font-bold text-white font-mono tabular-nums">
@@ -193,32 +308,32 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Collapsible Trading Ticket / Order Book / Asset Details */}
+        {/* Right Column: Pro Trade Workstation & Depth of Market Ladder */}
         <div className={`transition-all duration-200 ${isPanelCollapsed ? 'hidden' : 'lg:col-span-4 xl:col-span-3'}`}>
-          <div className="bg-[#1e222d] border border-[#2a2e39] rounded-lg overflow-hidden flex flex-col">
+          <div className="bg-[#1e222d] border border-[#2a2e39] rounded-lg overflow-hidden flex flex-col shadow-lg">
             {/* Panel Tabs Header */}
             <div className="flex items-center justify-between border-b border-[#2a2e39] bg-[#171b26] p-1.5">
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setActiveTab('trade')}
                   className={`px-3 py-1 text-xs font-semibold rounded transition-colors ${
-                    activeTab === 'trade' ? 'bg-[#2a2e39] text-white' : 'text-[#787b86] hover:text-white'
+                    activeTab === 'trade' ? 'bg-[#2a2e39] text-white shadow-xs' : 'text-[#787b86] hover:text-white'
                   }`}
                 >
-                  Paper Trade
+                  Pro Order
                 </button>
                 <button
-                  onClick={() => setActiveTab('orderbook')}
+                  onClick={() => setActiveTab('dom')}
                   className={`px-3 py-1 text-xs font-semibold rounded transition-colors ${
-                    activeTab === 'orderbook' ? 'bg-[#2a2e39] text-white' : 'text-[#787b86] hover:text-white'
+                    activeTab === 'dom' ? 'bg-[#2a2e39] text-white shadow-xs' : 'text-[#787b86] hover:text-white'
                   }`}
                 >
-                  Order Book
+                  DOM Ladder
                 </button>
                 <button
                   onClick={() => setActiveTab('details')}
                   className={`px-3 py-1 text-xs font-semibold rounded transition-colors ${
-                    activeTab === 'details' ? 'bg-[#2a2e39] text-white' : 'text-[#787b86] hover:text-white'
+                    activeTab === 'details' ? 'bg-[#2a2e39] text-white shadow-xs' : 'text-[#787b86] hover:text-white'
                   }`}
                 >
                   Profile
@@ -234,9 +349,9 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
               </button>
             </div>
 
-            {/* TAB 1: Paper Trading Ticket */}
+            {/* TAB 1: Pro Order Execution Ticket */}
             {activeTab === 'trade' && (
-              <div className="p-4 flex flex-col gap-4 text-xs font-sans">
+              <div className="p-4 flex flex-col gap-3.5 text-xs font-sans">
                 {orderSuccessMsg && (
                   <div className="flex items-center gap-2 p-2.5 bg-[#089981]/15 border border-[#089981]/40 text-[#089981] rounded-md text-xs">
                     <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -244,7 +359,7 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
                   </div>
                 )}
 
-                {/* Buy / Sell Toggle Buttons */}
+                {/* Buy / Sell Toggles */}
                 <div className="grid grid-cols-2 gap-2 p-1 bg-[#131722] rounded-lg border border-[#2a2e39]">
                   <button
                     onClick={() => setSide('buy')}
@@ -268,7 +383,7 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
                   </button>
                 </div>
 
-                {/* Order Type (Market vs Limit) */}
+                {/* Order Type */}
                 <div className="flex items-center gap-2">
                   <span className="text-[#787b86] font-medium w-20">Type</span>
                   <div className="flex-1 grid grid-cols-2 gap-1 bg-[#131722] p-0.5 rounded border border-[#2a2e39]">
@@ -293,7 +408,7 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
                   </div>
                 </div>
 
-                {/* Limit Price Input (if limit selected) */}
+                {/* Limit Price */}
                 {orderType === 'limit' && (
                   <div className="flex items-center gap-2">
                     <span className="text-[#787b86] font-medium w-20">Limit Price</span>
@@ -310,7 +425,7 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
                   </div>
                 )}
 
-                {/* Quantity / Units */}
+                {/* Quantity */}
                 <div className="flex items-center gap-2">
                   <span className="text-[#787b86] font-medium w-20">Quantity</span>
                   <div className="flex-1 flex items-center gap-1">
@@ -336,18 +451,65 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
                   </div>
                 </div>
 
-                {/* Cost Summary Breakdown */}
-                <div className="bg-[#131722] p-3 rounded-lg border border-[#2a2e39] space-y-1.5 font-mono text-xs">
+                {/* Pro Risk Management: Take Profit & Stop Loss */}
+                <div className="border border-[#2a2e39] rounded-lg p-2.5 bg-[#131722] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-[#d1d4dc] flex items-center gap-1.5 text-[11px]">
+                      <Target className="w-3.5 h-3.5 text-[#2962ff]" />
+                      Bracket Orders (TP / SL)
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={enableTPSL}
+                      onChange={(e) => setEnableTPSL(e.target.checked)}
+                      className="accent-[#2962ff] rounded cursor-pointer"
+                    />
+                  </div>
+
+                  {enableTPSL && (
+                    <div className="space-y-2 pt-1 font-mono text-[11px]">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#089981] font-semibold">Take Profit</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={takeProfitPrice}
+                          onChange={(e) => setTakeProfitPrice(Number(e.target.value))}
+                          className="w-24 bg-[#1e222d] border border-[#2a2e39] rounded px-2 py-1 text-white text-right"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#f23645] font-semibold">Stop Loss</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={stopLossPrice}
+                          onChange={(e) => setStopLossPrice(Number(e.target.value))}
+                          className="w-24 bg-[#1e222d] border border-[#2a2e39] rounded px-2 py-1 text-white text-right"
+                        />
+                      </div>
+                      {riskRewardRatio !== null && (
+                        <div className="flex justify-between pt-1 border-t border-[#2a2e39] text-[#787b86]">
+                          <span>Risk : Reward</span>
+                          <span className="text-white font-bold">1 : {riskRewardRatio}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Order Cost Summary */}
+                <div className="bg-[#131722] p-3 rounded-lg border border-[#2a2e39] space-y-1 font-mono text-xs">
                   <div className="flex justify-between text-[#787b86]">
                     <span>Execution Price</span>
                     <span className="text-white tabular-nums">{formatPrice(effectivePrice)}</span>
                   </div>
                   <div className="flex justify-between text-[#787b86]">
-                    <span>Order Value</span>
+                    <span>Total Value</span>
                     <span className="text-white tabular-nums">{formatPrice(orderTotal)}</span>
                   </div>
-                  <div className="flex justify-between text-[#787b86] pt-1.5 border-t border-[#2a2e39]">
-                    <span>Virtual Buying Power</span>
+                  <div className="flex justify-between text-[#787b86] pt-1 border-t border-[#2a2e39]">
+                    <span>Buying Power</span>
                     <span className="text-emerald-400 tabular-nums">{formatPrice(paperBalance)}</span>
                   </div>
                 </div>
@@ -359,57 +521,61 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
                     side === 'buy' ? 'bg-[#089981] hover:bg-[#067a67]' : 'bg-[#f23645] hover:bg-[#d42735]'
                   }`}
                 >
-                  Place {side.toUpperCase()} Order · {formatPrice(orderTotal)}
+                  Execute {side.toUpperCase()} Order · {formatPrice(orderTotal)}
                 </button>
-
-                <p className="text-[11px] text-center text-[#787b86]">
-                  Simulated paper execution with zero real-money risk.
-                </p>
               </div>
             )}
 
-            {/* TAB 2: Level 2 Order Book Depth */}
-            {activeTab === 'orderbook' && (
+            {/* TAB 2: Institutional Depth of Market (DOM) Ladder */}
+            {activeTab === 'dom' && (
               <div className="p-3 font-mono text-xs space-y-2">
-                <div className="grid grid-cols-3 text-[10px] text-[#787b86] uppercase font-bold pb-1 border-b border-[#2a2e39]">
-                  <span>Price (USD)</span>
-                  <span className="text-right">Size</span>
-                  <span className="text-right">Total</span>
+                <div className="text-[10px] text-[#787b86] uppercase font-bold flex items-center justify-between pb-1 border-b border-[#2a2e39]">
+                  <span>Bid Depth</span>
+                  <span>Price (Click to Limit)</span>
+                  <span className="text-right">Ask Depth</span>
                 </div>
 
-                {/* Asks (Sell orders - red) */}
-                <div className="space-y-0.5">
+                {/* Asks (Sell orders) */}
+                <div className="space-y-1">
                   {orderBook.asks.slice().reverse().map((ask, idx) => (
-                    <div key={`ask-${idx}`} className="grid grid-cols-3 py-0.5 hover:bg-[#2a2e39]/50 relative text-[#f23645]">
-                      <span className="font-semibold">{ask.price.toFixed(2)}</span>
+                    <div
+                      key={`ask-${idx}`}
+                      onClick={() => handleDOMClickPrice(ask.price)}
+                      className="grid grid-cols-3 py-1 px-1.5 rounded cursor-pointer hover:bg-[#f23645]/10 text-xs border border-transparent hover:border-[#f23645]/40 transition-colors"
+                    >
+                      <span className="text-[#787b86]">-</span>
+                      <span className="text-center font-bold text-[#f23645]">{ask.price.toFixed(2)}</span>
                       <span className="text-right text-[#d1d4dc]">{ask.size}</span>
-                      <span className="text-right text-[#787b86]">{ask.total}</span>
                     </div>
                   ))}
                 </div>
 
-                {/* Mid Spread Indicator */}
-                <div className="py-1.5 px-2 bg-[#131722] rounded border border-[#2a2e39] flex items-center justify-between text-[11px]">
+                {/* Mid Spread */}
+                <div className="py-1.5 px-3 bg-[#131722] rounded border border-[#2a2e39] flex items-center justify-between text-[11px]">
                   <span className="text-[#787b86]">Spread</span>
                   <span className="font-bold text-white">{orderBook.spread.toFixed(2)} ({orderBook.spreadPercent}%)</span>
                 </div>
 
-                {/* Bids (Buy orders - green) */}
-                <div className="space-y-0.5">
+                {/* Bids (Buy orders) */}
+                <div className="space-y-1">
                   {orderBook.bids.map((bid, idx) => (
-                    <div key={`bid-${idx}`} className="grid grid-cols-3 py-0.5 hover:bg-[#2a2e39]/50 relative text-[#089981]">
-                      <span className="font-semibold">{bid.price.toFixed(2)}</span>
-                      <span className="text-right text-[#d1d4dc]">{bid.size}</span>
-                      <span className="text-right text-[#787b86]">{bid.total}</span>
+                    <div
+                      key={`bid-${idx}`}
+                      onClick={() => handleDOMClickPrice(bid.price)}
+                      className="grid grid-cols-3 py-1 px-1.5 rounded cursor-pointer hover:bg-[#089981]/10 text-xs border border-transparent hover:border-[#089981]/40 transition-colors"
+                    >
+                      <span className="text-left text-[#d1d4dc]">{bid.size}</span>
+                      <span className="text-center font-bold text-[#089981]">{bid.price.toFixed(2)}</span>
+                      <span className="text-right text-[#787b86]">-</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* TAB 3: Symbol Profile & About */}
+            {/* TAB 3: Symbol Profile */}
             {activeTab === 'details' && (
-              <div className="p-4 space-y-4 text-xs">
+              <div className="p-4 space-y-4 text-xs font-sans">
                 <div>
                   <h4 className="font-bold text-white text-sm mb-1">{asset.name} ({asset.symbol})</h4>
                   <p className="text-[#787b86] leading-relaxed">{asset.description}</p>
@@ -438,6 +604,16 @@ export const SuperChartTerminal: React.FC<SuperChartTerminalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Price Alerts Modal */}
+      <PriceAlertsModal
+        isOpen={isAlertsModalOpen}
+        onClose={() => setIsAlertsModalOpen(false)}
+        asset={asset}
+        alerts={alerts}
+        onAddAlert={onAddAlert}
+        onDeleteAlert={onDeleteAlert}
+      />
     </div>
   );
 };

@@ -50,7 +50,39 @@ export interface IndicatorConfig {
   showRSI: boolean;
   showMACD: boolean;
   showVolume: boolean;
+  showVWAP: boolean;
+  showSupertrend: boolean;
+  showVolumeProfile: boolean;
 }
+
+export type DrawingTool = 'cursor' | 'trendline' | 'horizontal' | 'fibonacci' | 'position' | 'ruler' | 'eraser';
+
+export interface DrawingPoint {
+  index: number;
+  price: number;
+  timeLabel?: string;
+}
+
+export interface DrawingItem {
+  id: string;
+  type: 'trendline' | 'horizontal' | 'fibonacci' | 'position' | 'ruler';
+  points: DrawingPoint[];
+  color?: string;
+  text?: string;
+}
+
+export interface PriceAlert {
+  id: string;
+  symbol: string;
+  targetPrice: number;
+  condition: 'above' | 'below';
+  note: string;
+  createdAt: string;
+  triggered?: boolean;
+}
+
+export type MultiChartLayout = '1x1' | '1x2' | '2x2';
+
 
 export interface OrderBookEntry {
   price: number;

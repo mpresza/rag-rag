@@ -212,6 +212,156 @@ export function formatPrice(price: number, currency: string = '$'): string {
   return `${currency}${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+export function calculateVWAP(candles: CandleData[]): (number | null)[] {
+  let cumVolume = 0;
+  let cumTypicalVolume = 0;
+  const result: (number | null)[] = [];
+
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const typicalPrice = (c.high + c.low + c.close) / 3;
+    cumVolume += c.volume;
+    cumTypicalVolume += typicalPrice * c.volume;
+    const vwap = cumVolume > 0 ? cumTypicalVolume / cumVolume : typicalPrice;
+    result.push(Number(vwap.toFixed(2)));
+  }
+
+  return result;
+}
+
+export interface SupertrendResult {
+  trend: ('bullish' | 'bearish')[];
+  supertrendLine: (number | null)[];
+}
+
+export function calculateSupertrend(candles: CandleData[], period: number = 10, multiplier: number = 3): SupertrendResult {
+  const trend: ('bullish' | 'bearish')[] = [];
+  const supertrendLine: (number | null)[] = [];
+
+  if (candles.length < period) {
+    return {
+      trend: candles.map(() => 'bullish'),
+      supertrendLine: candles.map(() => null)
+    };
+  }
+
+  // Calculate True Range
+  const tr: number[] = [candles[0].high - candles[0].low];
+  for (let i = 1; i < candles.length; i++) {
+    const hl = candles[i].high - candles[i].low;
+    const hc = Math.abs(candles[i].high - candles[i - 1].close);
+    const lc = Math.abs(candles[i].low - candles[i - 1].close);
+    tr.push(Math.max(hl, hc, lc));
+  }
+
+  // ATR Simple Moving Average
+  const atr: number[] = [];
+  let sumTR = 0;
+  for (let i = 0; i < tr.length; i++) {
+    sumTR += tr[i];
+    if (i >= period) {
+      sumTR -= tr[i - period];
+      atr.push(sumTR / period);
+    } else {
+      atr.push(sumTR / (i + 1));
+    }
+  }
+
+  let currentTrend: 'bullish' | 'bearish' = 'bullish';
+  let prevUpper = candles[0].close + atr[0] * multiplier;
+  let prevLower = candles[0].close - atr[0] * multiplier;
+
+  for (let i = 0; i < candles.length; i++) {
+    const hl2 = (candles[i].high + candles[i].low) / 2;
+    const basicUpper = hl2 + multiplier * atr[i];
+    const basicLower = hl2 - multiplier * atr[i];
+
+    let upper = basicUpper;
+    let lower = basicLower;
+
+    if (i > 0) {
+      if (candles[i - 1].close < prevUpper) {
+        upper = Math.min(basicUpper, prevUpper);
+      }
+      if (candles[i - 1].close > prevLower) {
+        lower = Math.max(basicLower, prevLower);
+      }
+
+      if (candles[i].close > prevUpper) {
+        currentTrend = 'bullish';
+      } else if (candles[i].close < prevLower) {
+        currentTrend = 'bearish';
+      }
+    }
+
+    prevUpper = upper;
+    prevLower = lower;
+
+    trend.push(currentTrend);
+    supertrendLine.push(Number((currentTrend === 'bullish' ? lower : upper).toFixed(2)));
+  }
+
+  return { trend, supertrendLine };
+}
+
+export interface VolumeProfileBin {
+  priceLevel: number;
+  buyVolume: number;
+  sellVolume: number;
+  totalVolume: number;
+  isPOC: boolean; // Point of Control
+}
+
+export function calculateVolumeProfile(candles: CandleData[], binCount: number = 24): { bins: VolumeProfileBin[]; pocPrice: number } {
+  if (candles.length === 0) return { bins: [], pocPrice: 0 };
+
+  let minP = Infinity;
+  let maxP = -Infinity;
+  candles.forEach(c => {
+    if (c.low < minP) minP = c.low;
+    if (c.high > maxP) maxP = c.high;
+  });
+
+  const step = (maxP - minP) / binCount || 1;
+  const bins: VolumeProfileBin[] = [];
+
+  for (let b = 0; b < binCount; b++) {
+    bins.push({
+      priceLevel: minP + (b + 0.5) * step,
+      buyVolume: 0,
+      sellVolume: 0,
+      totalVolume: 0,
+      isPOC: false
+    });
+  }
+
+  candles.forEach(c => {
+    const binIdx = Math.min(binCount - 1, Math.max(0, Math.floor((c.close - minP) / step)));
+    const isBull = c.close >= c.open;
+    const halfVol = c.volume / 2;
+    bins[binIdx].buyVolume += isBull ? halfVol * 1.5 : halfVol * 0.5;
+    bins[binIdx].sellVolume += isBull ? halfVol * 0.5 : halfVol * 1.5;
+    bins[binIdx].totalVolume += c.volume;
+  });
+
+  let maxVol = 0;
+  let pocPrice = minP;
+  bins.forEach(b => {
+    if (b.totalVolume > maxVol) {
+      maxVol = b.totalVolume;
+      pocPrice = b.priceLevel;
+    }
+  });
+
+  bins.forEach(b => {
+    if (Math.abs(b.priceLevel - pocPrice) < step / 2) {
+      b.isPOC = true;
+    }
+  });
+
+  return { bins, pocPrice };
+}
+
 export function formatLargeNumber(num: number): string {
   if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
   if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
